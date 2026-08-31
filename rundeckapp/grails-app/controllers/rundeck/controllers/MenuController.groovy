@@ -3732,9 +3732,13 @@ if executed in cluster mode.
 
         def results=[:]
         if(request.format=='json' ) {
-            // Grails 7: Parse body using Jackson instead of request.JSON
-            def data = com.dtolabs.rundeck.util.JsonUtil.parseRequestBody(request)
-            def nextScheduled = data?.join(",")?.replaceAll(/"/, '')
+            // Grails 7: Parse body using Jackson instead of request.JSON.
+            // This endpoint receives a JSON *array* of job ids, so it must use
+            // parseRequestBodyJson -- parseRequestBody only returns a Map and silently yields null
+            // for an array, which left idlist empty and made the jobs list come back blank.
+            def data = com.dtolabs.rundeck.util.JsonUtil.parseRequestBodyJson(request)
+            def nextScheduled = (data instanceof Collection ? data : (data != null ? [data] : []))
+                    .join(",")?.replaceAll(/"/, '')
             def query = new ScheduledExecutionQuery()
             query.idlist = nextScheduled
             query.projFilter = params.project

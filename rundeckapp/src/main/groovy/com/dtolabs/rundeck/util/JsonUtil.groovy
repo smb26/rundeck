@@ -40,6 +40,31 @@ class JsonUtil {
      * @throws IOException if JSON parsing fails (but not if body is unavailable)
      */
     static Map parseRequestBody(HttpServletRequest request) throws IOException {
+        def parsed = parseRequestBodyJson(request)
+        if (parsed == null) {
+            return null
+        }
+        if (!(parsed instanceof Map)) {
+            log.error("parseRequestBody: [${request.method} ${request.requestURI}] body is a " +
+                      "${parsed.getClass().simpleName}, not a JSON object — returning null. " +
+                      "If this endpoint legitimately receives a JSON array, use parseRequestBodyJson().")
+            return null
+        }
+        return (Map) parsed
+    }
+
+    /**
+     * Parse the JSON request body as either an object or an array.
+     *
+     * request.JSON (which this class replaced during the Grails 7 migration) accepted both shapes,
+     * but parseRequestBody only ever returned a Map and silently yielded null for an array. Any
+     * endpoint receiving an array therefore saw a null body and quietly did nothing --
+     * e.g. MenuController.listExport, whose `data?.join(",")` needs a List.
+     *
+     * @param request HttpServletRequest with a JSON body
+     * @return a Map or a List, or null if the body is empty, unreadable, or malformed
+     */
+    static Object parseRequestBodyJson(HttpServletRequest request) throws IOException {
         def contentType = request.contentType
         if (contentType && !contentType.toLowerCase().contains('json')) {
             return null
@@ -74,10 +99,12 @@ class JsonUtil {
         }
 
         try {
-            return objectMapper.readValue(content, Map.class)
+            //Object.class so a JSON array deserialises to a List rather than failing
+            return objectMapper.readValue(content, Object.class)
         } catch (JsonProcessingException parseEx) {
-            // Body readable but not a JSON object (array, primitive, malformed) — return null
-            log.error("parseRequestBody: JSON parsing failed [${parseEx.class.simpleName}: ${parseEx.originalMessage}] — body was readable but not a JSON object")
+            // Body readable but genuinely malformed. Include the request URI: without it this error
+            // is untraceable to a caller, which makes a silently-null body very hard to diagnose.
+            log.error("parseRequestBodyJson: JSON parsing failed for [${request.method} ${request.requestURI}] [${parseEx.class.simpleName}: ${parseEx.originalMessage}]")
             return null
         }
     }
